@@ -6,7 +6,7 @@ Run a scheduled task on AWS Batch using Ansible and Docker.
 
 ## Default Configuration:
 
-* Concurrency restricted to one at a time by limiting the resources of the ComputeEnvironment. (Job `vCpus: 2` // Default Evnironment `MaxvCpus: 2`)
+* Concurrency restricted to one at a time by limiting the resources of the ComputeEnvironment. (Job `vCpus: 2` // Default Environment `MaxvCpus: 2`)
 * Ansible Playbook notifies Slack at job start and at job failure/success and sends failure/success notification to Datadog.
 * Job names are random. This can be modified in `cfn/batch-scheduled-task.template` by assigning a static value to job1Name in line 161.
 
