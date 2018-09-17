@@ -1,10 +1,10 @@
 Run a scheduled task on AWS Batch using Ansible and Docker.
 
-*DEPENDENCIES:*
+## DEPENDENCIES:
 
 - [awscli](https://aws.amazon.com/cli/)
 
-# Default Configuration:
+## Default Configuration:
 
 * Concurrency restricted to one at a time by limiting the resources of the ComputeEnvironment. (Job `vCpus: 2` // Default Evnironment `MaxvCpus: 2`)
 * Ansible Playbook notifies Slack at job start and at job failure/success and sends failure/success notification to Datadog.
