@@ -1,0 +1,77 @@
+- name: 'Test playbook to sleep for a specified interval'
+
+  #################################################
+  #This selects a random host from hosts file
+  #################################################
+  hosts: "{{ groups['cluster_members'] | random }}"
+  #################################################
+  
+  gather_facts: false
+  vars:
+    - sleep_interval: 3600
+    - slack_token: ${SLACK_TOKEN}
+    - datadog_api_key: ${DATADOG_API_KEY}  
+    - datadog_app_key: ${DATADOG_APP_KEY}
+
+  tasks:
+
+    - name: Send notification message via Slack of start
+      slack:
+        token: '{{ slack_token }}'
+        msg: 'sleep on {{ inventory_hostname }} beginning run'
+        channel: '#general'
+      delegate_to: localhost    
+   
+    ##################################################
+    # This is where you would add your scheduled task      
+    ##################################################
+    - name: sleep for a specified interval
+      command: sleep '{{ sleep_interval }}'
+      register: result
+    ##################################################  
+
+    - name: Add success to syslog
+      when: result|succeeded
+      syslogger:
+        msg: "sleep ran successfully" 
+
+    - name: Add fail to syslog
+      when: result|failed
+      syslogger:
+        msg: "sleep ran unsuccessfully"
+       
+    - name: Send notification message via Slack of success
+      slack:
+        token: '{{ slack_token }}'
+        msg: 'sleep on {{ inventory_hostname }} ran successfully'
+        channel: '#general'
+      when: result|succeeded 
+      delegate_to: localhost    
+
+    - name: Send notification message via Slack of failure
+      slack:
+        token: '{{ slack_token }}'
+        msg: 'sleep on {{ inventory_hostname }} ran unsuccessfully'
+        channel: '#general'
+      when: result|failed
+      delegate_to: localhost
+
+    - name: Send event notification to Datadog of success 
+      datadog_event:
+        title: 'Ansible on {{ inventory_hostname }}'
+        text: 'sleep on {{ inventory_hostname }} ran successfully'
+        api_key: '{{ datadog_api_key }}'
+        app_key: '{{ datadog_app_key }}'
+        tags: '#host:{{ inventory_hostname }}' 
+      when: result|succeeded
+      delegate_to: localhost  
+
+    - name: Send event notification to Datadog of failure
+      datadog_event:
+        title: 'Ansible on {{ inventory_hostname }}'
+        text: 'sleep on {{ inventory_hostname }} ran unsuccessfully'
+        api_key: '{{ datadog_api_key }}'
+        app_key: '{{ datadog_app_key }}'
+        tags: '#host:{{ inventory_hostname }}'
+      when: result|failed
+      delegate_to: localhost  

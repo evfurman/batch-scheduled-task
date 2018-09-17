@@ -1,0 +1,231 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Task Runner using AWS Batch and Cloudwatch Events'
+
+Resources:
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: EC2 Security Group for instances launched in the VPC by Batch
+      VpcId:
+        Ref: VPC
+
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.0.0/24
+      VpcId:
+        Ref: VPC
+      MapPublicIpOnLaunch: 'True'
+
+  Route:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      SubnetId:
+        Ref: Subnet
+
+  BatchServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: batch.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
+
+  IamInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+      - Ref: EcsInstanceRole
+
+  EcsInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2008-10-17'
+        Statement:
+        - Sid: ''
+          Effect: Allow
+          Principal:
+            Service: ec2.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+
+  JobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      JobDefinitionName: batch-scheduled-task
+      Type: container
+      ContainerProperties:
+        Image: "evfurman/batch-scheduled-task"
+        Vcpus: 2
+        Memory: 2000
+      RetryStrategy:
+        Attempts: 1
+
+  JobQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName: batch-scheduled-task
+      Priority: 1
+      ComputeEnvironmentOrder:
+      - Order: 1
+        ComputeEnvironment:
+          Ref: ComputeEnvironment
+
+  ComputeEnvironment:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      Type: MANAGED
+      ComputeResources:
+        Type: EC2
+        MinvCpus: 0
+        DesiredvCpus: 2
+        MaxvCpus: 2
+        InstanceTypes:
+        - optimal
+        Subnets:
+        - Ref: Subnet
+        SecurityGroupIds:
+        - Ref: SecurityGroup
+        InstanceRole:
+          Ref: IamInstanceProfile
+      ServiceRole:
+        Ref: BatchServiceRole
+  
+  CloudwatchEventRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: Task Scheduler Event
+      Name: batch-scheduled-task
+      ScheduleExpression: rate(1 hour)
+      State: ENABLED
+      Targets:
+        - Id: batch-scheduled-task 
+          Arn: !GetAtt TriggerFunction.Arn
+
+  TriggerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          import random 
+          import string
+
+          def handler(event,context):
+              jobqueue = os.environ['JobQueue']
+              jobdef = os.environ['JobDefinition']
+
+              job1Name = 'job1' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+
+              session = boto3.session.Session()
+              client = session.client('batch')
+
+              job1 = client.submit_job(
+                  jobName=job1Name,
+                  jobQueue=jobqueue,
+                  jobDefinition=jobdef
+              )
+              print("Started Job: {}".format(job1['jobName']))      
+      Description: "Triggers AWS Batch when invoked"
+      Environment: 
+        Variables:
+          JobQueue: !Ref JobQueue
+          JobDefinition: !Ref JobDefinition
+      FunctionName: !Join ["",["BatchTrigger"]]
+      Handler: index.handler
+      MemorySize: 128
+      Role: !GetAtt [ TriggerIAMRole, Arn ]
+      Runtime: python3.6
+      Timeout: 60
+      
+  TriggerIAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - 
+            Effect: 'Allow'
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - 
+          PolicyName: 'SubmitBatch'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - 
+                Effect: 'Allow'
+                Action:
+                  - 'batch:SubmitJob'
+                Resource: '*'    
+
+Outputs:
+
+  CloudwatchEventRule:
+    Value:
+      Ref: CloudwatchEventRule
+  
+  ComputeEnvironmentArn:
+    Value:
+      Ref: ComputeEnvironment
+
+  JobQueueArn:
+    Value:
+      Ref: JobQueue
+
+  JobDefinitionArn:
+    Value:
+      Ref: JobDefinition
+
+  TriggerFunction:
+    Value:
+      Ref: TriggerFunction    
