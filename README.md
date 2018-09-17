@@ -1,6 +1,6 @@
 Run a scheduled task on AWS Batch using Ansible and Docker.
 
-## DEPENDENCIES:
+## Dependencies:
 
 - [awscli](https://aws.amazon.com/cli/)
 
